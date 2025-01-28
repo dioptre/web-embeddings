@@ -1,169 +1,225 @@
 <!DOCTYPE html>
 <html>
-  <head>
-    <meta charset="utf-8" />
-    <title>ONNXRuntime Web + GTE-Small (Local)</title>
-    
-    <!-- TensorFlow.js (full bundle) -->
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.15.0/dist/tf.min.js"></script>
-    
-    <!-- ONNX Runtime -->
-    <script 
-      src="https://unpkg.com/onnxruntime-web/dist/ort.min.js"
-      onload="console.log('ONNX Runtime loaded successfully')"
-      onerror="console.error('Failed to load ONNX Runtime script')"
-    ></script>
-  </head>
-  <body>
-    <h1>Local GTE-Small ONNX Embeddings</h1>
-    <script>
-      // Helper function to wait for ort to be available
-      function waitForOrt(maxAttempts = 10) {
-        return new Promise((resolve, reject) => {
-          let attempts = 0;
-          const check = () => {
-            if (window.ort) {
-              resolve(window.ort);
-            } else if (attempts < maxAttempts) {
-              attempts++;
-              setTimeout(check, 500);
-            } else {
-              reject(new Error('Failed to load ONNX Runtime'));
-            }
-          };
-          check();
-        });
+
+<head>
+  <meta charset="utf-8" />
+  <title>ONNXRuntime Web + GTE-Small (Local)</title>
+
+  <!-- TensorFlow.js (full bundle) -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.15.0/dist/tf.min.js"></script>
+
+  <!-- ONNX Runtime -->
+  <script src="https://unpkg.com/onnxruntime-web/dist/ort.min.js"
+    onload="console.log('ONNX Runtime loaded successfully')"
+    onerror="console.error('Failed to load ONNX Runtime script')"></script>
+</head>
+
+<body>
+  <h1>Local GTE-Small ONNX Embeddings</h1>
+  <script>
+    // Helper function to wait for ort to be available
+    function waitForOrt(maxAttempts = 10) {
+      return new Promise((resolve, reject) => {
+        let attempts = 0;
+        const check = () => {
+          if (window.ort) {
+            resolve(window.ort);
+          } else if (attempts < maxAttempts) {
+            attempts++;
+            setTimeout(check, 500);
+          } else {
+            reject(new Error('Failed to load ONNX Runtime'));
+          }
+        };
+        check();
+      });
+    }
+
+    // Simple tokenizer class
+    class SimpleTokenizer {
+      constructor(vocab) {
+        this.vocab = vocab;
+        this.maxLength = 512;
       }
 
-      // Simple tokenizer class
-      class SimpleTokenizer {
-        constructor(vocab) {
-          this.vocab = vocab;
-          this.maxLength = 512;
+      encode(text) {
+        // Basic tokenization (you might want to improve this)
+        const tokens = text.toLowerCase().split(/\s+/);
+        const ids = tokens.map(token => this.vocab[token] || this.vocab['[UNK]']);
+        const attentionMask = new Array(ids.length).fill(1);
+        const tokenTypeIds = new Array(ids.length).fill(0);
+
+        // Pad or truncate to maxLength
+        while (ids.length < this.maxLength) {
+          ids.push(0);
+          attentionMask.push(0);
+          tokenTypeIds.push(0);
+        }
+        if (ids.length > this.maxLength) {
+          ids.length = this.maxLength;
+          attentionMask.length = this.maxLength;
+          tokenTypeIds.length = this.maxLength;
         }
 
-        encode(text) {
-          // Basic tokenization (you might want to improve this)
-          const tokens = text.toLowerCase().split(/\s+/);
-          const ids = tokens.map(token => this.vocab[token] || this.vocab['[UNK]']);
-          const attentionMask = new Array(ids.length).fill(1);
-          const tokenTypeIds = new Array(ids.length).fill(0);
-          
-          // Pad or truncate to maxLength
-          while (ids.length < this.maxLength) {
-            ids.push(0);
-            attentionMask.push(0);
-            tokenTypeIds.push(0);
-          }
-          if (ids.length > this.maxLength) {
-            ids.length = this.maxLength;
-            attentionMask.length = this.maxLength;
-            tokenTypeIds.length = this.maxLength;
-          }
-
-          return {
-            ids: ids,
-            attentionMask: attentionMask,
-            tokenTypeIds: tokenTypeIds
-          };
-        }
+        return {
+          ids: ids,
+          attentionMask: attentionMask,
+          tokenTypeIds: tokenTypeIds
+        };
       }
+    }
 
-      window.addEventListener('load', async function() {
-        try {
-          // Initialize TensorFlow.js first
-          await tf.ready();
-          await tf.setBackend('cpu');
-          console.log('TensorFlow.js initialized with backend:', tf.getBackend());
+    window.addEventListener('load', async function () {
+      try {
+        // Initialize TensorFlow.js first
+        await tf.ready();
+        await tf.setBackend('cpu');
+        console.log('TensorFlow.js initialized with backend:', tf.getBackend());
 
-          // Wait for ort to be available
-          const ort = await waitForOrt();
-          
-          // Create an InferenceSession from our local model
-          const session = await ort.InferenceSession.create(
-            "model/model_O4.onnx"
+        // Wait for ort to be available
+        const ort = await waitForOrt();
+
+        // Create an InferenceSession from our local model
+        const session = await ort.InferenceSession.create(
+          "model/model_O4.onnx"
+        );
+
+        // Load the local tokenizer.json and initialize tokenizer
+        const tokenizerJSON = await fetch("model/tokenizer.json").then(res => res.json());
+        const tokenizer = new SimpleTokenizer(tokenizerJSON.model.vocab);
+
+        // Helper to tokenize text
+        async function tokenize(text) {
+          const encoding = tokenizer.encode(text);
+
+          // Convert arrays to BigInt64Array for 64-bit model
+          const inputIdsTensor = new window.ort.Tensor(
+            "int64",
+            BigInt64Array.from(encoding.ids.map(BigInt)),
+            [1, encoding.ids.length]
+          );
+          const attentionMaskTensor = new window.ort.Tensor(
+            "int64",
+            BigInt64Array.from(encoding.attentionMask.map(BigInt)),
+            [1, encoding.attentionMask.length]
+          );
+          const tokenTypeIdsTensor = new window.ort.Tensor(
+            "int64",
+            BigInt64Array.from(encoding.tokenTypeIds.map(BigInt)),
+            [1, encoding.tokenTypeIds.length]
           );
 
-          // Load the local tokenizer.json and initialize tokenizer
-          const tokenizerJSON = await fetch("model/tokenizer.json").then(res => res.json());
-          const tokenizer = new SimpleTokenizer(tokenizerJSON.model.vocab);
+          return {
+            input_ids: inputIdsTensor,
+            attention_mask: attentionMaskTensor,
+            token_type_ids: tokenTypeIdsTensor
+          };
+        }
 
-          // Helper to tokenize text
-          async function tokenize(text) {
-            const encoding = tokenizer.encode(text);
-
-            // Convert arrays to Int64Array
-            const inputIdsTensor = new window.ort.Tensor(
-              "int64",
-              BigInt64Array.from(encoding.ids.map(n => BigInt(n))),
-              [1, encoding.ids.length]
-            );
-            const attentionMaskTensor = new window.ort.Tensor(
-              "int64",
-              BigInt64Array.from(encoding.attentionMask.map(n => BigInt(n))),
-              [1, encoding.attentionMask.length]
-            );
-            const tokenTypeIdsTensor = new window.ort.Tensor(
-              "int64",
-              BigInt64Array.from(encoding.tokenTypeIds.map(n => BigInt(n))),
-              [1, encoding.tokenTypeIds.length]
-            );
-
-            return {
-              input_ids: inputIdsTensor,
-              attention_mask: attentionMaskTensor,
-              token_type_ids: tokenTypeIdsTensor
-            };
-          }
-
-          // 4. Inference function: get embedding
-          async function getEmbedding(text) {
-            const feeds = await tokenize(text);
-            const results = await session.run(feeds);
-
-            // Get the output tensor (last_hidden_state)
-            const outputTensor = results["last_hidden_state"] || results["sentence_embedding"] || results["output_0"];
-            
-            // Convert to regular array for processing
-            const hiddenStates = Array.from(outputTensor.data);
-            
-            // Get dimensions
-            const [batchSize, seqLength, hiddenSize] = outputTensor.dims;
-            
-            // Perform mean pooling over the token embeddings
-            const embedding = new Float32Array(hiddenSize);
-            let validTokens = 0;
-            
-            // Sum up embeddings for non-padding tokens (where attention_mask is 1)
-            for (let i = 0; i < seqLength; i++) {
-              if (feeds.attention_mask.data[i] === 1n) {  // Note: BigInt comparison
-                validTokens++;
-                for (let j = 0; j < hiddenSize; j++) {
-                  embedding[j] += hiddenStates[i * hiddenSize + j];
-                }
+        // 4. Inference function: get embedding
+        async function getEmbedding(text) {
+          const feeds = await tokenize(text);
+          const results = await session.run(feeds);
+          
+          // Debug logs to see the structure
+          console.log('ONNX Results:', results);
+          console.log('ONNX Results keys:', Object.keys(results));
+          const firstOutputKey = Object.keys(results)[0];
+          const outputTensor = results[firstOutputKey];
+          console.log('Output tensor dims:', outputTensor.dims);
+          
+          // Get the data from the correct dimension (assuming last_hidden_state output)
+          // We want to average pool across all tokens (excluding padding)
+          const outputData = outputTensor.data;
+          const [batchSize, seqLength, hiddenSize] = outputTensor.dims;
+          
+          // Calculate mean embedding across non-padding tokens
+          let sumEmbedding = new Array(hiddenSize).fill(0);
+          let validTokens = 0;
+          
+          // Use attention mask to identify non-padding tokens
+          const attentionMask = feeds.attention_mask.data;
+          
+          for (let i = 0; i < seqLength; i++) {
+            if (Number(attentionMask[i]) === 1) {  // Convert BigInt to Number
+              validTokens++;
+              for (let j = 0; j < hiddenSize; j++) {
+                sumEmbedding[j] += outputData[i * hiddenSize + j];
               }
             }
-            
-            // Calculate mean by dividing by number of valid tokens
-            for (let i = 0; i < hiddenSize; i++) {
-              embedding[i] /= validTokens;
-            }
-
-            return embedding;
           }
-
-          // 5. Try it out
-          for (let i = 0; i < 10; i++) {
-          const testText = "Hello from the local GTE-Small model!";
-          const embeddingVector = await getEmbedding(testText);
-
-            console.log("Input text:", testText);
-            console.log("Embedding vector (Float32Array):", embeddingVector);
-          }
-        } catch (error) {
-          console.error("Error:", error);
+          
+          // Calculate mean
+          const meanEmbedding = sumEmbedding.map(sum => sum / validTokens);
+          
+          // Normalize the embedding
+          const norm = Math.sqrt(meanEmbedding.reduce((sum, val) => sum + val * val, 0));
+          const normalizedEmbedding = meanEmbedding.map(val => val / norm);
+          
+          return normalizedEmbedding;
         }
-      });
-    </script>
-  </body>
+
+        for (let i = 0; i < 1; i++) {
+          // 5. Try it out
+          const testText = `Once upon a time, there was a golden retriever named Max who lived in a cozy house at the edge of a small town. Max wasn't just any ordinary dog - he had the biggest heart and the most adventurous spirit anyone had ever seen. Every morning, he would wake up with the sun, his tail wagging with excitement for what the new day might bring. His family, the Andersons, had rescued him from a shelter when he was just a puppy, and he spent every day trying to repay their kindness with boundless love and loyalty.
+
+Max had a daily routine that he followed religiously. After breakfast, he would patrol the backyard, making sure no squirrels were causing mischief in his territory. He took this job very seriously, though the squirrels seemed to find his determined pursuit rather amusing. In the afternoon, he would wait by the front window for the neighborhood children to return from school. The kids would always stop to pet him and share stories about their day, and Max would listen intently, as if he understood every word.
+
+One particularly memorable summer day, Max discovered a hole in the backyard fence. While any other dog might have seen this as an opportunity for escape, Max saw it as a chance for adventure - and more importantly, a chance to help others. He squeezed through the hole and found himself in the local park, where he heard a small cry coming from the pond. A tiny duckling had become separated from its family and was struggling to find its way back. Max, with his gentle nature, carefully guided the duckling back to its mother and siblings, earning grateful quacks from the duck family.
+
+As the years went by, Max became something of a local legend in the neighborhood. He was known for helping carry groceries (in his own special way) for elderly Mrs. Thompson next door, finding lost toys for children, and somehow always knowing when someone needed a friendly paw or a sympathetic ear. He had an uncanny ability to sense when someone was feeling sad or lonely, and would often sit quietly beside them, offering silent comfort and support.
+
+During the winter months, Max would get especially excited about the snow. He would bound through the white drifts, making snow-dog angels and chasing snowflakes as they fell from the sky. His enthusiasm was infectious, and soon the whole neighborhood would join in, building snowmen and having snowball fights while Max ran between them all, barking joyfully.
+
+Max had a special relationship with Sarah, the Andersons' youngest daughter. When she was learning to read, she would sit with Max for hours, reading stories out loud while he listened attentively, his head resting on her lap. If she struggled with a word, he would give her an encouraging nudge with his nose, as if to say "You can do it!" Their bond was unbreakable, and Sarah often said that Max was not just her dog, but her best friend.
+
+As Max grew older, his steps became a little slower and his fur began to show signs of gray, but his spirit remained as young and vibrant as ever. He still greeted each day with enthusiasm, still loved his daily walks (even if they were shorter now), and still made time to visit with all his neighborhood friends. The wisdom of his years only made him more gentle and understanding, and younger dogs in the neighborhood would often seek him out for guidance and companionship.
+
+One of Max's greatest achievements was helping the Andersons foster other rescue dogs. He seemed to understand that these dogs needed extra love and patience, and he would show them the ropes of living in a loving home. He taught them how to trust again, how to play, and most importantly, how to love. Many of these dogs went on to find their forever homes, carrying with them the lessons they learned from their wise golden friend.
+
+The story of Max is more than just a tale about a dog - it's a story about love, loyalty, and the profound impact one gentle soul can have on an entire community. He showed everyone he met that the simplest acts of kindness could make the biggest difference in someone's day. Whether it was sharing his favorite toy with a new puppy, comforting a child after a bad day at school, or simply being there as a constant, loving presence, Max embodied the pure, unconditional love that dogs are known for.
+
+Even now, years later, the neighborhood still tells stories about the golden retriever who touched so many lives with his golden heart. Max's legacy lives on in the countless lives he touched, the lessons he taught, and the love he shared so freely. He proved that sometimes the best heroes have four legs and a tail, and that true friendship knows no bounds.`;
+
+          const embeddingVector = await getEmbedding(testText);
+          console.log("Input text length:", testText.length);
+          console.log("Embedding vector (Float32Array):", embeddingVector);          
+        }
+        // Test cosine similarity between different texts
+        function cosineSimilarity(a, b) {
+          let dotProduct = 0;
+          let normA = 0;
+          let normB = 0;
+          for (let i = 0; i < a.length; i++) {
+            dotProduct += a[i] * b[i];
+            normA += a[i] * a[i];
+            normB += b[i] * b[i];
+          }
+          return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+        }
+
+        // Test with very different concepts
+        const text1 = "The sun is shining brightly in the clear blue sky.";
+        const text2 = "Heavy rain poured down in the dark stormy night.";
+        const text3 = "The sun is a bright star in space.";
+
+        console.log("\nSimilarity test between contrasting concepts:");
+        const embedding1 = await getEmbedding(text1);
+        const embedding2 = await getEmbedding(text2);
+        const embedding3 = await getEmbedding(text3);
+
+        const similarity12 = cosineSimilarity(embedding1, embedding2);
+        const similarity13 = cosineSimilarity(embedding1, embedding3);
+        const similarity23 = cosineSimilarity(embedding2, embedding3);
+
+        console.log("Similarity between sunny and rainy:", similarity12);
+        console.log("Similarity between sunny and sun:", similarity13);
+        console.log("Similarity between rainy and sun:", similarity23);
+      } catch (error) {
+        console.error("Error:", error);
+      }
+    });
+  </script>
+</body>
+
 </html>
