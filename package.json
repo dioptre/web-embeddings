@@ -3,6 +3,28 @@
   "version": "1.0.0",
   "description": "Local GTE-Small ONNX embeddings demo",
   "scripts": {
-    "start": "python -m http.server 8000"
-  }
-} 
+    "start": "parcel index.html",
+    "build": "parcel build index.html --public-url ./"
+  },
+  "dependencies": {
+    "onnxruntime-web": "^1.20.1",
+    "yarn": "^1.22.22"
+  },
+  "devDependencies": {
+    "buffer": "^5.5.0||^6.0.0",
+    "parcel": "^2.12.0",
+    "parcel-reporter-static-files-copy": "^1.5.3",
+    "process": "^0.11.10"
+  },
+  "staticFiles": [
+    {
+      "staticPath": "model",
+      "staticOutPath": "model"
+    },
+    {
+      "staticPath": "node_modules/onnxruntime-web/dist",
+      "staticOutPath": "onnxruntime-web"
+    }
+  ],
+  "packageManager": "yarn@1.22.21+sha1.1959a18351b811cdeedbd484a8f86c3cc3bbaf72"
+}
