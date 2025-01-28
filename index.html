@@ -79,9 +79,16 @@
         // Wait for ort to be available
         const ort = await waitForOrt();
 
+        const sessionOptions = {
+          executionProviders: ['wasm'],
+          enableWasmThreads: true,  // Enable multi-threading if the browser supports it
+          enableWasmSIMD: true      // Enable SIMD instructions if the browser supports them
+        };
+
         // Create an InferenceSession from our local model
         const session = await ort.InferenceSession.create(
-          "model/model_O4.onnx"
+          "model/model_O4.onnx", 
+          sessionOptions
         );
 
         // Load the local tokenizer.json and initialize tokenizer
@@ -120,26 +127,26 @@
         async function getEmbedding(text) {
           const feeds = await tokenize(text);
           const results = await session.run(feeds);
-          
+
           // Debug logs to see the structure
           console.log('ONNX Results:', results);
           console.log('ONNX Results keys:', Object.keys(results));
           const firstOutputKey = Object.keys(results)[0];
           const outputTensor = results[firstOutputKey];
           console.log('Output tensor dims:', outputTensor.dims);
-          
+
           // Get the data from the correct dimension (assuming last_hidden_state output)
           // We want to average pool across all tokens (excluding padding)
           const outputData = outputTensor.data;
           const [batchSize, seqLength, hiddenSize] = outputTensor.dims;
-          
+
           // Calculate mean embedding across non-padding tokens
           let sumEmbedding = new Array(hiddenSize).fill(0);
           let validTokens = 0;
-          
+
           // Use attention mask to identify non-padding tokens
           const attentionMask = feeds.attention_mask.data;
-          
+
           for (let i = 0; i < seqLength; i++) {
             if (Number(attentionMask[i]) === 1) {  // Convert BigInt to Number
               validTokens++;
@@ -148,14 +155,14 @@
               }
             }
           }
-          
+
           // Calculate mean
           const meanEmbedding = sumEmbedding.map(sum => sum / validTokens);
-          
+
           // Normalize the embedding
           const norm = Math.sqrt(meanEmbedding.reduce((sum, val) => sum + val * val, 0));
           const normalizedEmbedding = meanEmbedding.map(val => val / norm);
-          
+
           return normalizedEmbedding;
         }
 
@@ -183,7 +190,7 @@ Even now, years later, the neighborhood still tells stories about the golden ret
 
           const embeddingVector = await getEmbedding(testText);
           console.log("Input text length:", testText.length);
-          console.log("Embedding vector (Float32Array):", embeddingVector);          
+          console.log("Embedding vector (Float32Array):", embeddingVector);
         }
         // Test cosine similarity between different texts
         function cosineSimilarity(a, b) {
