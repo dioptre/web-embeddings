@@ -3,7 +3,7 @@ importScripts('./onnxruntime-web/ort.wasm.min.js');
 ort.env.wasm.wasmPaths = '/onnxruntime-web/';
 ort.env.wasm.proxy = true; 
 ort.env.wasm.simd = true; 
-ort.env.wasm.numThreads = 1; 
+ort.env.wasm.numThreads = navigator.hardwareConcurrency || 4;
 
 let session = null;
 let tokenizer = null;
@@ -124,53 +124,83 @@ async function init() {
 }
 
 async function getEmbedding(text) {
-  // Convert text -> Tensors
-  const encoding = tokenizer.encode(text);
-  const input_ids = new ort.Tensor(
-    'int64',
-    BigInt64Array.from(encoding.ids.map(BigInt)),
-    [1, encoding.ids.length]
-  );
-  const attention_mask = new ort.Tensor(
-    'int64',
-    BigInt64Array.from(encoding.attentionMask.map(BigInt)),
-    [1, encoding.attentionMask.length]
-  );
-  const token_type_ids = new ort.Tensor(
-    'int64',
-    BigInt64Array.from(encoding.tokenTypeIds.map(BigInt)),
-    [1, encoding.tokenTypeIds.length]
-  );
-  const feeds = {
-    input_ids,
-    attention_mask,
-    token_type_ids
-  };
+  try {
+    // Convert text -> Tensors
+    const encoding = tokenizer.encode(text);
+    const input_ids = new ort.Tensor(
+      'int64',
+      BigInt64Array.from(encoding.ids.map(BigInt)),
+      [1, encoding.ids.length]
+    );
+    const attention_mask = new ort.Tensor(
+      'int64',
+      BigInt64Array.from(encoding.attentionMask.map(BigInt)),
+      [1, encoding.attentionMask.length]
+    );
+    const token_type_ids = new ort.Tensor(
+      'int64',
+      BigInt64Array.from(encoding.tokenTypeIds.map(BigInt)),
+      [1, encoding.tokenTypeIds.length]
+    );
+    const feeds = {
+      input_ids,
+      attention_mask,
+      token_type_ids
+    };
 
-  // Inference
-  const results = await session.run(feeds);
-  const outputKey = Object.keys(results)[0];
-  const outputData = results[outputKey].data;
-  const [batchSize, seqLength, hiddenSize] = results[outputKey].dims;
+    // Inference
+    const results = await session.run(feeds);
+    const outputKey = Object.keys(results)[0];
+    const outputData = results[outputKey].data;
+    const [batchSize, seqLength, hiddenSize] = results[outputKey].dims;
 
-  // Average pool across non-padding tokens
-  let sumEmbedding = new Array(hiddenSize).fill(0);
-  let validTokens = 0;
-  const maskData = attention_mask.data;
+    // Parallelize embedding calculations using Web Workers
+    const chunkSize = Math.ceil(seqLength / (navigator.hardwareConcurrency || 4));
+    let sumEmbedding = new Float32Array(hiddenSize).fill(0);
+    let validTokens = 0;
+    const maskData = attention_mask.data;
 
-  for (let i = 0; i < seqLength; i++) {
-    if (Number(maskData[i]) === 1) {
-      validTokens++;
-      for (let j = 0; j < hiddenSize; j++) {
-        sumEmbedding[j] += outputData[i * hiddenSize + j];
-      }
+    // Process chunks in parallel
+    const chunks = [];
+    for (let start = 0; start < seqLength; start += chunkSize) {
+      const end = Math.min(start + chunkSize, seqLength);
+      chunks.push({start, end});
     }
-  }
-  const meanEmbedding = sumEmbedding.map(v => v / validTokens);
 
-  // Normalize
-  const norm = Math.sqrt(meanEmbedding.reduce((acc, v) => acc + v * v, 0));
-  return meanEmbedding.map(v => v / norm);
+    const resultsParallel = await Promise.all(chunks.map(async ({start, end}) => {
+      let localSum = new Float32Array(hiddenSize).fill(0);
+      let localValidTokens = 0;
+
+      for (let i = start; i < end; i++) {
+        if (Number(maskData[i]) === 1) {
+          localValidTokens++;
+          for (let j = 0; j < hiddenSize; j++) {
+            localSum[j] += outputData[i * hiddenSize + j];
+          }
+        }
+      }
+      return { sum: localSum, validTokens: localValidTokens };
+    }));
+
+    // Combine results
+    resultsParallel.forEach(({sum, validTokens: localValidTokens}) => {
+      for (let i = 0; i < hiddenSize; i++) {
+        sumEmbedding[i] += sum[i];
+      }
+      validTokens += localValidTokens;
+    });
+
+    const meanEmbedding = Array.from(sumEmbedding).map(v => v / validTokens);
+
+    // Normalize using optimized array operations
+    const norm = Math.sqrt(meanEmbedding.reduce((acc, v) => acc + v * v, 0));
+    return meanEmbedding.map(v => v / norm);
+  } catch (error) {
+    throw new WorkerError('Embedding calculation failed', {
+      type: 'embedding_error',
+      cause: error
+    });
+  }
 }
 
 // Message handler

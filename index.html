@@ -80,9 +80,14 @@
           worker.postMessage({ command: 'infer', text });
         });
 
-        const embedding1 = await getEmbeddingFromWorker(text1);
-        const embedding2 = await getEmbeddingFromWorker(text2);
-        const embedding3 = await getEmbeddingFromWorker(text3);
+        let embedding1 = await getEmbeddingFromWorker(text1);
+        let embedding2 = await getEmbeddingFromWorker(text2);
+        let embedding3 = await getEmbeddingFromWorker(text3);
+
+        //await Promise.all([embedding1p, embedding2p, embedding3p]);
+        // let embedding1 = await embedding1p;
+        // let embedding2 = await embedding2p;
+        // let embedding3 = await embedding3p;
 
         // Calculate similarities
         const similarity12 = cosineSimilarity(embedding1, embedding2);
@@ -90,10 +95,10 @@
         const similarity31 = cosineSimilarity(embedding3, embedding1);
         const similarity32 = cosineSimilarity(embedding3, embedding2);
         
-        console.log("Similarity sunny->rainy:", similarity12);
-        console.log("Similarity rainy->sunny:", similarity21);
-        console.log("Similarity sun->sun:", similarity31);
-        console.log("Similarity sun->rainy:", similarity32);
+          console.log("Similarity sunny->rainy:", similarity12);
+          console.log("Similarity rainy->sunny:", similarity21);
+          console.log("Similarity sun->sun:", similarity31);
+          console.log("Similarity sun->rainy:", similarity32);
         console.log("Difference:", Math.abs(similarity12 - similarity21));
 
       } catch (error) {
