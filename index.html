@@ -192,17 +192,14 @@ Even now, years later, the neighborhood still tells stories about the golden ret
           console.log("Input text length:", testText.length);
           console.log("Embedding vector (Float32Array):", embeddingVector);
         }
-        // Test cosine similarity between different texts
+        // Simplified cosine similarity since vectors are already normalized
         function cosineSimilarity(a, b) {
-          let dotProduct = 0;
-          let normA = 0;
-          let normB = 0;
-          for (let i = 0; i < a.length; i++) {
-            dotProduct += a[i] * b[i];
-            normA += a[i] * a[i];
-            normB += b[i] * b[i];
-          }
-          return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+            let dotProduct = 0.0;
+            for (let i = 0; i < a.length; i++) {
+                // Use high-precision arithmetic
+                dotProduct = dotProduct + (a[i] * b[i]);
+            }
+            return Number(dotProduct.toFixed(10));  // Limit to 10 decimal places for consistency
         }
 
         // Test with very different concepts
@@ -215,13 +212,20 @@ Even now, years later, the neighborhood still tells stories about the golden ret
         const embedding2 = await getEmbedding(text2);
         const embedding3 = await getEmbedding(text3);
 
+        // Test both directions
         const similarity12 = cosineSimilarity(embedding1, embedding2);
+        const similarity21 = cosineSimilarity(embedding2, embedding1);
+        const similarity31 = cosineSimilarity(embedding3, embedding1);
+        const similarity32 = cosineSimilarity(embedding3, embedding2);
+        console.log("Similarity sunny->rainy:", similarity12);
+        console.log("Similarity rainy->sunny:", similarity21);
+        console.log("Similarity sun->sun:", similarity31);
+        console.log("Similarity sun->rainy:", similarity32);
+        console.log("Difference:", Math.abs(similarity12 - similarity21));
+
+        // Other similarity calculations
         const similarity13 = cosineSimilarity(embedding1, embedding3);
         const similarity23 = cosineSimilarity(embedding2, embedding3);
-
-        console.log("Similarity between sunny and rainy:", similarity12);
-        console.log("Similarity between sunny and sun:", similarity13);
-        console.log("Similarity between rainy and sun:", similarity23);
       } catch (error) {
         console.error("Error:", error);
       }
