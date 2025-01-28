@@ -121,21 +121,45 @@
             const feeds = await tokenize(text);
             const results = await session.run(feeds);
 
-            // The output name depends on how the model was exported.
-            // For many HF exports, you'll see "last_hidden_state" or "output_0".
-            // Check your model to see the actual output name(s).
-            // Let's assume there's a "last_hidden_state" or "sentence_embedding".
-            // We'll guess "last_hidden_state" for a typical BERT-like export.
-            const embedding = results["last_hidden_state"] || results["sentence_embedding"] || results["output_0"];
-            return embedding.data;
+            // Get the output tensor (last_hidden_state)
+            const outputTensor = results["last_hidden_state"] || results["sentence_embedding"] || results["output_0"];
+            
+            // Convert to regular array for processing
+            const hiddenStates = Array.from(outputTensor.data);
+            
+            // Get dimensions
+            const [batchSize, seqLength, hiddenSize] = outputTensor.dims;
+            
+            // Perform mean pooling over the token embeddings
+            const embedding = new Float32Array(hiddenSize);
+            let validTokens = 0;
+            
+            // Sum up embeddings for non-padding tokens (where attention_mask is 1)
+            for (let i = 0; i < seqLength; i++) {
+              if (feeds.attention_mask.data[i] === 1n) {  // Note: BigInt comparison
+                validTokens++;
+                for (let j = 0; j < hiddenSize; j++) {
+                  embedding[j] += hiddenStates[i * hiddenSize + j];
+                }
+              }
+            }
+            
+            // Calculate mean by dividing by number of valid tokens
+            for (let i = 0; i < hiddenSize; i++) {
+              embedding[i] /= validTokens;
+            }
+
+            return embedding;
           }
 
           // 5. Try it out
+          for (let i = 0; i < 10; i++) {
           const testText = "Hello from the local GTE-Small model!";
           const embeddingVector = await getEmbedding(testText);
 
-          console.log("Input text:", testText);
-          console.log("Embedding vector (Float32Array):", embeddingVector);
+            console.log("Input text:", testText);
+            console.log("Embedding vector (Float32Array):", embeddingVector);
+          }
         } catch (error) {
           console.error("Error:", error);
         }
