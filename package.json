@@ -1,0 +1,8 @@
+{
+  "name": "gte-small-local",
+  "version": "1.0.0",
+  "description": "Local GTE-Small ONNX embeddings demo",
+  "scripts": {
+    "start": "python -m http.server 8000"
+  }
+} 

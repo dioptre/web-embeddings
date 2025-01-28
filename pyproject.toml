@@ -1,0 +1,15 @@
+[tool.poetry]
+name = "web-embeddings"
+version = "0.1.0"
+description = ""
+authors = ["Andrew Grosser <dioptre@gmail.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.10"
+onnx = "^1.17.0"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

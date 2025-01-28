@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>ONNXRuntime Web + GTE-Small (Local)</title>
+    
+    <!-- TensorFlow.js (full bundle) -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.15.0/dist/tf.min.js"></script>
+    
+    <!-- ONNX Runtime -->
+    <script 
+      src="https://unpkg.com/onnxruntime-web/dist/ort.min.js"
+      onload="console.log('ONNX Runtime loaded successfully')"
+      onerror="console.error('Failed to load ONNX Runtime script')"
+    ></script>
+  </head>
+  <body>
+    <h1>Local GTE-Small ONNX Embeddings</h1>
+    <script>
+      // Helper function to wait for ort to be available
+      function waitForOrt(maxAttempts = 10) {
+        return new Promise((resolve, reject) => {
+          let attempts = 0;
+          const check = () => {
+            if (window.ort) {
+              resolve(window.ort);
+            } else if (attempts < maxAttempts) {
+              attempts++;
+              setTimeout(check, 500);
+            } else {
+              reject(new Error('Failed to load ONNX Runtime'));
+            }
+          };
+          check();
+        });
+      }
+
+      // Simple tokenizer class
+      class SimpleTokenizer {
+        constructor(vocab) {
+          this.vocab = vocab;
+          this.maxLength = 512;
+        }
+
+        encode(text) {
+          // Basic tokenization (you might want to improve this)
+          const tokens = text.toLowerCase().split(/\s+/);
+          const ids = tokens.map(token => this.vocab[token] || this.vocab['[UNK]']);
+          const attentionMask = new Array(ids.length).fill(1);
+          const tokenTypeIds = new Array(ids.length).fill(0);
+          
+          // Pad or truncate to maxLength
+          while (ids.length < this.maxLength) {
+            ids.push(0);
+            attentionMask.push(0);
+            tokenTypeIds.push(0);
+          }
+          if (ids.length > this.maxLength) {
+            ids.length = this.maxLength;
+            attentionMask.length = this.maxLength;
+            tokenTypeIds.length = this.maxLength;
+          }
+
+          return {
+            ids: ids,
+            attentionMask: attentionMask,
+            tokenTypeIds: tokenTypeIds
+          };
+        }
+      }
+
+      window.addEventListener('load', async function() {
+        try {
+          // Initialize TensorFlow.js first
+          await tf.ready();
+          await tf.setBackend('cpu');
+          console.log('TensorFlow.js initialized with backend:', tf.getBackend());
+
+          // Wait for ort to be available
+          const ort = await waitForOrt();
+          
+          // Create an InferenceSession from our local model
+          const session = await ort.InferenceSession.create(
+            "model/model_O4.onnx"
+          );
+
+          // Load the local tokenizer.json and initialize tokenizer
+          const tokenizerJSON = await fetch("model/tokenizer.json").then(res => res.json());
+          const tokenizer = new SimpleTokenizer(tokenizerJSON.model.vocab);
+
+          // Helper to tokenize text
+          async function tokenize(text) {
+            const encoding = tokenizer.encode(text);
+
+            // Convert arrays to Int64Array
+            const inputIdsTensor = new window.ort.Tensor(
+              "int64",
+              BigInt64Array.from(encoding.ids.map(n => BigInt(n))),
+              [1, encoding.ids.length]
+            );
+            const attentionMaskTensor = new window.ort.Tensor(
+              "int64",
+              BigInt64Array.from(encoding.attentionMask.map(n => BigInt(n))),
+              [1, encoding.attentionMask.length]
+            );
+            const tokenTypeIdsTensor = new window.ort.Tensor(
+              "int64",
+              BigInt64Array.from(encoding.tokenTypeIds.map(n => BigInt(n))),
+              [1, encoding.tokenTypeIds.length]
+            );
+
+            return {
+              input_ids: inputIdsTensor,
+              attention_mask: attentionMaskTensor,
+              token_type_ids: tokenTypeIdsTensor
+            };
+          }
+
+          // 4. Inference function: get embedding
+          async function getEmbedding(text) {
+            const feeds = await tokenize(text);
+            const results = await session.run(feeds);
+
+            // The output name depends on how the model was exported.
+            // For many HF exports, you'll see "last_hidden_state" or "output_0".
+            // Check your model to see the actual output name(s).
+            // Let's assume there's a "last_hidden_state" or "sentence_embedding".
+            // We'll guess "last_hidden_state" for a typical BERT-like export.
+            const embedding = results["last_hidden_state"] || results["sentence_embedding"] || results["output_0"];
+            return embedding.data;
+          }
+
+          // 5. Try it out
+          const testText = "Hello from the local GTE-Small model!";
+          const embeddingVector = await getEmbedding(testText);
+
+          console.log("Input text:", testText);
+          console.log("Embedding vector (Float32Array):", embeddingVector);
+        } catch (error) {
+          console.error("Error:", error);
+        }
+      });
+    </script>
+  </body>
+</html>
