@@ -70,6 +70,9 @@
 
         console.log("\nSimilarity test between contrasting concepts:");
         
+        // Start timing
+        console.time('Embedding and similarity calculations');
+
         // Get embeddings using worker
         const getEmbeddingFromWorker = (text) => new Promise((resolve) => {
           worker.onmessage = (e) => {
@@ -79,6 +82,8 @@
           };
           worker.postMessage({ command: 'infer', text });
         });
+
+        
 
         let embedding1 = await getEmbeddingFromWorker(text1);
         let embedding2 = await getEmbeddingFromWorker(text2);
@@ -100,6 +105,9 @@
           console.log("Similarity sun->sun:", similarity31);
           console.log("Similarity sun->rainy:", similarity32);
         console.log("Difference:", Math.abs(similarity12 - similarity21));
+
+        // End timing
+        console.timeEnd('Embedding and similarity calculations');
 
       } catch (error) {
         console.error("Error:", error);
